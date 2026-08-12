@@ -7,6 +7,7 @@ import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
 } from '../test/sharedMutationLock'
+import { setClaudeConfigHomeDirForTesting } from '../utils/envUtils'
 import {
   resolveModelRuntimeLimits,
   resolveOpenAIShimRuntimeContext,
@@ -16,9 +17,6 @@ import {
   getDiscoveryCacheKey,
   getRouteDiscoveryHeaders,
 } from './discoveryService'
-import { setClaudeConfigHomeDirForTesting } from '../utils/envUtils.js'
-
-const originalConfigDir = process.env.CLAUDE_CONFIG_DIR
 
 async function withTempConfigDir<T>(fn: () => Promise<T>): Promise<T> {
   await acquireSharedMutationLock('integrations/runtimeMetadata.test.ts')
@@ -26,19 +24,13 @@ async function withTempConfigDir<T>(fn: () => Promise<T>): Promise<T> {
   try {
     tempDir = mkdtempSync(join(tmpdir(), 'openclaude-runtime-metadata-test-'))
     setClaudeConfigHomeDirForTesting(tempDir)
-    process.env.CLAUDE_CONFIG_DIR = tempDir
     return await fn()
   } finally {
     try {
-      if (originalConfigDir === undefined) {
-        delete process.env.CLAUDE_CONFIG_DIR
-      } else {
-        process.env.CLAUDE_CONFIG_DIR = originalConfigDir
-      }
+      setClaudeConfigHomeDirForTesting(undefined)
       if (tempDir) {
         rmSync(tempDir, { recursive: true, force: true })
       }
-      setClaudeConfigHomeDirForTesting(undefined)
     } finally {
       releaseSharedMutationLock()
     }
@@ -74,50 +66,6 @@ describe('resolveModelRuntimeLimits', () => {
           },
         }).contextWindow,
       ).toBe(1_000_000)
-    })
-  })
-
-  it('uses the stable xAI OAuth cache identity for discovered runtime limits', async () => {
-    await withTempConfigDir(async () => {
-      const xaiCredentials = await import('../utils/xaiCredentials.js')
-      const readSpy = spyOn(xaiCredentials, 'getCachedXaiCredentials').mockReturnValue({
-        accessToken: 'rotating-access-token',
-        refreshToken: 'stable-account-identity',
-        tokenEndpoint: 'https://auth.x.ai/oauth/token',
-      })
-      try {
-        const baseUrl = 'https://api.x.ai/v1'
-        await setCachedModels(
-          getDiscoveryCacheKey('xai', {
-            baseUrl,
-            apiKey: 'rotating-access-token',
-            cacheKey: 'stable-account-identity',
-          }),
-          {
-            models: [
-              {
-                id: 'grok-4.7',
-                apiName: 'grok-4.7',
-                label: 'grok-4.7',
-                contextWindow: 500_000,
-              },
-            ],
-          },
-        )
-
-        expect(
-          resolveModelRuntimeLimits({
-            model: 'grok-4.7',
-            processEnv: {
-              CLAUDE_CODE_USE_OPENAI: '1',
-              OPENAI_BASE_URL: baseUrl,
-              XAI_CREDENTIAL_SOURCE: 'oauth',
-            },
-          }).contextWindow,
-        ).toBe(500_000)
-      } finally {
-        readSpy.mockRestore()
-      }
     })
   })
   it('uses built-in Z.AI GLM-5.2 runtime limits', () => {
@@ -232,6 +180,7 @@ describe('resolveModelRuntimeLimits', () => {
           getDiscoveryCacheKey('xai', {
             baseUrl,
             apiKey: 'oauth-token',
+            cacheKey: 'refresh-token',
           }),
           {
             models: [

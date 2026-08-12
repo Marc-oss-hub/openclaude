@@ -1071,6 +1071,7 @@ describe('discoverModelsForRoute', () => {
         getDiscoveryCacheKey('xai', {
           baseUrl: 'https://api.x.ai/v1',
           apiKey: 'cached-oauth-token',
+          cacheKey: 'refresh-token',
         }),
         { models: [{ id: 'cached-grok', apiName: 'cached-grok', label: 'cached-grok' }] },
       )
