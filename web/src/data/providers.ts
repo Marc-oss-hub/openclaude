@@ -157,6 +157,14 @@ export const providers: Provider[] = [
     notes: 'Multi-provider model router with Chat Completions, Responses, authenticated catalog discovery, and routing policies.',
   },
   {
+    id: 'orcarouter',
+    name: 'OrcaRouter',
+    group: 'gateways',
+    setup: '/provider or env vars',
+    envVars: ['ORCAROUTER_API_KEY'],
+    notes: 'OpenAI-compatible model routing gateway with named auto routing.',
+  },
+  {
     id: 'near-ai',
     name: 'NEAR AI',
     group: 'gateways',
