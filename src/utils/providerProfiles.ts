@@ -117,6 +117,27 @@ export type ProviderPresetDefaults = Omit<ProviderProfileInput, 'provider'> & {
 const PROFILE_ENV_APPLIED_FLAG = 'CLAUDE_CODE_PROVIDER_PROFILE_ENV_APPLIED'
 const PROFILE_ENV_APPLIED_ID = 'CLAUDE_CODE_PROVIDER_PROFILE_ENV_APPLIED_ID'
 
+// Keep the installed key's origin independent of mutable saved config. Another
+// CLI can remove that saved key before this process next reconciles its env.
+let appliedOrcarouterCredential: { profileId: string; value: string } | undefined
+
+function isManagedOrcarouterCredential(processEnv: NodeJS.ProcessEnv): boolean {
+  return appliedOrcarouterCredential !== undefined &&
+    processEnv[PROFILE_ENV_APPLIED_FLAG] === '1' &&
+    processEnv[PROFILE_ENV_APPLIED_ID] === appliedOrcarouterCredential.profileId &&
+    sanitizeApiKey(processEnv.ORCAROUTER_API_KEY)?.trim() === appliedOrcarouterCredential.value
+}
+
+function rememberManagedOrcarouterCredential(profile: ProviderProfile): void {
+  const value = sanitizeApiKey(profile.apiKey)?.trim()
+  if (value && resolveRouteIdFromBaseUrl(profile.baseUrl) === 'orcarouter' &&
+    process.env[PROFILE_ENV_APPLIED_FLAG] === '1' &&
+    trimOrUndefined(process.env[PROFILE_ENV_APPLIED_ID]) === profile.id &&
+    sanitizeApiKey(process.env.ORCAROUTER_API_KEY)?.trim() === value) {
+    appliedOrcarouterCredential = { profileId: profile.id, value }
+  }
+}
+
 type ProfileCompatibilityMode =
   | 'anthropic'
   | 'gemini'
@@ -904,6 +925,11 @@ function hostDedicatedCredentialsAligned(
   if (!includeApiKey) {
     return true
   }
+  if (!profile.apiKey &&
+    resolveRouteIdFromBaseUrl(profile.baseUrl) === 'orcarouter' &&
+    isManagedOrcarouterCredential(processEnv)) {
+    return false
+  }
   const dedicated = getHostDedicatedCredentialEnv(
     profile.baseUrl,
     profile.apiKey ?? '',
@@ -1180,6 +1206,7 @@ export function clearProviderProfileEnvFromProcessEnv(
   clearManagedProfileEnv(processEnv)
   delete processEnv[PROFILE_ENV_APPLIED_FLAG]
   delete processEnv[PROFILE_ENV_APPLIED_ID]
+  if (processEnv === process.env) appliedOrcarouterCredential = undefined
 }
 
 export function applyProviderProfileToProcessEnv(
@@ -1274,14 +1301,17 @@ export function applyProviderProfileToProcessEnv(
       OPENAI_MODEL: primaryModel,
     }
     // Keyless canonical profiles already accept the dedicated shell key.
-    // Capture it before cleanup only when it is not owned by another profile.
+    // Reuse only actual shell input, not a key installed by this or another
+    // profile, including when another CLI removed this profile's saved key.
     const mayReuseOrcaEnvKey =
       process.env[PROFILE_ENV_APPLIED_FLAG] !== '1' ||
       trimOrUndefined(process.env[PROFILE_ENV_APPLIED_ID]) === profile.id
     if (!profile.apiKey && mayReuseOrcaEnvKey &&
       resolveRouteIdFromBaseUrl(normalizedProfileBaseUrl) === 'orcarouter') {
       const ambientKey = sanitizeApiKey(process.env.ORCAROUTER_API_KEY)
-      if (ambientKey) openAIProfileEnv.ORCAROUTER_API_KEY = ambientKey
+      if (ambientKey && !isManagedOrcarouterCredential(process.env)) {
+        openAIProfileEnv.ORCAROUTER_API_KEY = ambientKey
+      }
     }
     const isAimlapiProfile =
       profile.provider === 'aimlapi' ||
@@ -1556,6 +1586,7 @@ export function applyProviderProfileToProcessEnv(
   Object.assign(process.env, nextEnv)
   process.env[PROFILE_ENV_APPLIED_FLAG] = '1'
   process.env[PROFILE_ENV_APPLIED_ID] = profile.id
+  rememberManagedOrcarouterCredential(profile)
 }
 
 export function applyActiveProviderProfileFromConfig(
@@ -1592,6 +1623,10 @@ export function applyActiveProviderProfileFromConfig(
   if (!activeProfile) {
     return undefined
   }
+
+  // A fresh process may inherit the applied markers and key. Establish its
+  // provenance while the matching saved record still supplies that key.
+  rememberManagedOrcarouterCredential(activeProfile)
 
   const isCurrentEnvProfileManaged =
     processEnv[PROFILE_ENV_APPLIED_FLAG] === '1' &&
@@ -1697,7 +1732,6 @@ export function updateProviderProfile(
 
   let wasUpdated = false
   let shouldApply = false
-  let previousOrcaApiKey: string | undefined
 
   saveGlobalConfig(current => {
     const currentProfiles = getProviderProfiles(current)
@@ -1710,10 +1744,7 @@ export function updateProviderProfile(
     }
 
     wasUpdated = true
-    const previousProfile = currentProfiles[profileIndex]!
-    previousOrcaApiKey = resolveRouteIdFromBaseUrl(previousProfile.baseUrl) === 'orcarouter'
-      ? sanitizeApiKey(previousProfile.apiKey)?.trim()
-      : undefined
+    rememberManagedOrcarouterCredential(currentProfiles[profileIndex]!)
 
     const nextProfiles = [...currentProfiles]
     nextProfiles[profileIndex] = updatedProfile
@@ -1751,14 +1782,6 @@ export function updateProviderProfile(
   }
 
   if (shouldApply) {
-    // The config now contains the edited record. Do not re-adopt a removed
-    // saved key as ambient input when reapplying this same managed profile.
-    if (!updatedProfile.apiKey && previousOrcaApiKey &&
-      process.env[PROFILE_ENV_APPLIED_FLAG] === '1' &&
-      trimOrUndefined(process.env[PROFILE_ENV_APPLIED_ID]) === profileId &&
-      sanitizeApiKey(process.env.ORCAROUTER_API_KEY)?.trim() === previousOrcaApiKey) {
-      delete process.env.ORCAROUTER_API_KEY
-    }
     setActiveProviderProfile(profileId)
   }
 
