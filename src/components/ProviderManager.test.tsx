@@ -195,6 +195,7 @@ const PRESET_ORDER = [
   'OpenCode Go',
   'OpenCode Zen',
   'OpenRouter',
+  'OrcaRouter',
   'Together AI',
   'Venice',
   'xAI',
