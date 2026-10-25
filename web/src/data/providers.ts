@@ -160,7 +160,7 @@ export const providers: Provider[] = [
     id: 'orcarouter',
     name: 'OrcaRouter',
     group: 'gateways',
-    setup: '/provider or env vars',
+    setup: '/provider or ORCAROUTER_API_KEY with --provider orcarouter',
     envVars: ['ORCAROUTER_API_KEY'],
     notes: 'OpenAI-compatible model routing gateway with named auto routing.',
   },

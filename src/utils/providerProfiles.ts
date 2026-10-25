@@ -864,6 +864,9 @@ function getHostDedicatedCredentialEnv(
   route?: { routeId?: string; vendorId?: string },
 ): Record<string, string> {
   const env: Record<string, string> = {}
+  if (apiKey && resolveRouteIdFromBaseUrl(baseUrl) === 'orcarouter') {
+    env.ORCAROUTER_API_KEY = apiKey
+  }
   if (route?.routeId === 'xai' || isXaiBaseUrl(baseUrl)) {
     env.XAI_API_KEY = apiKey
   }
@@ -1269,6 +1272,11 @@ export function applyProviderProfileToProcessEnv(
     const openAIProfileEnv: ProfileEnv = {
       OPENAI_BASE_URL: normalizedProfileBaseUrl,
       OPENAI_MODEL: primaryModel,
+    }
+    // Keyless canonical profiles already accept the dedicated shell key.
+    // Capture it before managed-env cleanup, without promoting a generic key.
+    if (!profile.apiKey && resolveRouteIdFromBaseUrl(normalizedProfileBaseUrl) === 'orcarouter') {
+      openAIProfileEnv.ORCAROUTER_API_KEY = sanitizeApiKey(process.env.ORCAROUTER_API_KEY)
     }
     const isAimlapiProfile =
       profile.provider === 'aimlapi' ||

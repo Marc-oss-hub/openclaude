@@ -85,6 +85,7 @@ const RESTORED_KEYS = [
   'MIMO_API_KEY',
   'ATLAS_CLOUD_API_KEY',
   'GMI_API_KEY',
+  'ORCAROUTER_API_KEY',
   'APISMART_API_KEY',
   'APISMART_MODEL',
   'API_ROUTE_API_KEY',
@@ -6475,3 +6476,50 @@ test('DEFAULT_MISTRAL_MODEL matches the mistral gateway defaultModel', async () 
   expect(mistralGateway.defaultModel).toBeDefined()
   expect(DEFAULT_MISTRAL_MODEL).toBe(mistralGateway.defaultModel!)
 })
+
+test('keyless canonical Orca profile retains the dedicated shell credential', async () => {
+  const { applyProviderProfileToProcessEnv } = await importFreshProviderProfileModules()
+  process.env.ORCAROUTER_API_KEY = 'ambient-orca-key'
+  const saved = buildProfile({
+    provider: 'openai', baseUrl: 'https://api.orcarouter.ai/v1',
+    model: 'openai/gpt-5.5', apiKey: undefined,
+  })
+  applyProviderProfileToProcessEnv(saved)
+  expect(resolveRouteCredentialValue({
+    routeId: 'orcarouter', baseUrl: saved.baseUrl,
+  })).toBe('ambient-orca-key')
+  applyProviderProfileToProcessEnv({ ...saved, baseUrl: 'https://custom.example/v1' })
+  expect(process.env.ORCAROUTER_API_KEY).toBeUndefined()
+})
+
+for (const provider of ['orcarouter', 'openai']) {
+  test(`${provider} Orca profile owns its credential through apply, persist and relaunch`, async () => {
+    const { setActiveProviderProfile, applyActiveProviderProfileFromConfig } =
+      await importFreshProviderProfileModules()
+    const saved = buildProfile({
+      provider, apiKey: 'selected-orca-key',
+      baseUrl: 'https://api.orcarouter.ai/v1', model: 'openai/gpt-5.5',
+    })
+    saveMockGlobalConfig(current => ({ ...current, providerProfiles: [saved] }))
+    process.env.ORCAROUTER_API_KEY = 'ambient-parent-key'
+    setActiveProviderProfile(saved.id, { configDir: testConfigDir! })
+    expect(resolveRouteCredentialValue({
+      routeId: 'orcarouter', baseUrl: saved.baseUrl,
+    })).toBe('selected-orca-key')
+    process.env.ORCAROUTER_API_KEY = 'drifted-key'
+    expect(applyActiveProviderProfileFromConfig()?.id).toBe(saved.id)
+    expect(process.env.ORCAROUTER_API_KEY).toBe('selected-orca-key')
+
+    const persisted = JSON.parse(readFileSync(
+      join(testConfigDir!, '.openclaude-profile.json'), 'utf8',
+    ))
+    expect(persisted.env.ORCAROUTER_API_KEY).toBe('selected-orca-key')
+    const { buildStartupEnvFromProfile } = await import('./providerProfile.js')
+    const env = await buildStartupEnvFromProfile({
+      persisted, processEnv: { ORCAROUTER_API_KEY: 'other-ambient-key' },
+    })
+    expect(resolveRouteCredentialValue({
+      routeId: 'orcarouter', baseUrl: saved.baseUrl, processEnv: env,
+    })).toBe('selected-orca-key')
+  })
+}

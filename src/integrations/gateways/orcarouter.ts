@@ -1,4 +1,20 @@
 import { defineGateway } from '../define.js'
+import { getTrimmedString, isRecord } from '../modelMapping.js'
+
+function mapOrcarouterModel(raw: unknown) {
+  if (!isRecord(raw)) return null
+  const id = getTrimmedString(raw, 'id')
+  if (!id) return null
+  const context = raw.context_length
+  return {
+    id,
+    apiName: id,
+    label: id,
+    ...(typeof context === 'number' && Number.isInteger(context) && context > 0
+      ? { contextWindow: context }
+      : {}),
+  }
+}
 
 export default defineGateway({
   id: 'orcarouter',
@@ -30,7 +46,7 @@ export default defineGateway({
   },
   catalog: {
     source: 'hybrid',
-    discovery: { kind: 'openai-compatible' },
+    discovery: { kind: 'openai-compatible', mapModel: mapOrcarouterModel },
     discoveryCacheTtl: '1d',
     discoveryRefreshMode: 'background-if-stale',
     allowManualRefresh: true,
@@ -52,6 +68,7 @@ export default defineGateway({
         apiName: 'anthropic/claude-sonnet-4.6',
         label: 'Claude Sonnet 4.6 (via OrcaRouter)',
         modelDescriptorId: 'claude-sonnet-4-6',
+        maxOutputTokens: 64_000,
       },
       {
         id: 'orcarouter-gemini-3.5-flash',

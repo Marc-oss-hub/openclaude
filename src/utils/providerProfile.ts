@@ -122,6 +122,7 @@ const PROFILE_ENV_KEYS = [
   'MIMO_API_KEY',
   'ATLAS_CLOUD_API_KEY',
   'GMI_API_KEY',
+  'ORCAROUTER_API_KEY',
   'APISMART_API_KEY',
   'APISMART_MODEL',
   'API_ROUTE_API_KEY',
@@ -228,6 +229,7 @@ export type ProfileEnv = {
   MIMO_API_KEY?: string
   ATLAS_CLOUD_API_KEY?: string
   GMI_API_KEY?: string
+  ORCAROUTER_API_KEY?: string
   APISMART_API_KEY?: string
   API_ROUTE_API_KEY?: string
   CLINE_API_KEY?: string
@@ -1070,6 +1072,9 @@ export function buildOpenAIProfileEnv(options: {
   return {
     ...(resolveRouteIdFromBaseUrl(resolvedBaseUrl) === 'aimlapi' && key
       ? { AIMLAPI_API_KEY: key }
+      : {}),
+    ...(resolveRouteIdFromBaseUrl(resolvedBaseUrl) === 'orcarouter' && key
+      ? { ORCAROUTER_API_KEY: key }
       : {}),
     OPENAI_BASE_URL: resolvedBaseUrl,
     OPENAI_MODEL: normalizedModel,
@@ -2306,6 +2311,7 @@ export async function buildLaunchEnv(options: {
   for (const dedicatedKey of [
     'ATLAS_CLOUD_API_KEY',
     'GMI_API_KEY',
+    'ORCAROUTER_API_KEY',
     'APISMART_API_KEY',
     'CONCENTRATE_API_KEY',
     'LLMTR_API_KEY',
@@ -2345,6 +2351,9 @@ export async function buildLaunchEnv(options: {
       continue
     }
     if (dedicatedKey === 'APISMART_API_KEY' && effectiveOpenAIRouteId !== 'apismart') {
+      continue
+    }
+    if (dedicatedKey === 'ORCAROUTER_API_KEY' && effectiveOpenAIRouteId !== 'orcarouter') {
       continue
     }
     if (dedicatedKey === 'CONCENTRATE_API_KEY' && effectiveOpenAIRouteId !== 'concentrate') {
@@ -2499,12 +2508,24 @@ export async function buildLaunchEnv(options: {
             ? sanitizeApiKey(persistedOpenAICredential.value)
             : undefined)
         : undefined
+    // Recover only the selected canonical profile's own key, including older
+    // files that predate its dedicated alias. Never promote a shell generic key.
+    const persistedOrcarouterProfileKey =
+      dedicatedKey === 'ORCAROUTER_API_KEY' &&
+      effectiveOpenAIRouteId === 'orcarouter' &&
+      resolveRouteIdFromBaseUrl(persistedOpenAIBaseUrl) === 'orcarouter'
+        ? sanitizeApiKey(persistedEnv.ORCAROUTER_API_KEY) ||
+          (persistedOpenAICredential?.kind === 'usable'
+            ? sanitizeApiKey(persistedOpenAICredential.value)
+            : undefined)
+        : undefined
     const dedicatedValue = withholdAmbientDedicatedKey
       ? sanitizeApiKey(persistedEnv[dedicatedKey])
       : backfillDedicatedFromOpenAI ||
         persistedLlmtrProfileKey ||
         persistedMergeGatewayProfileKey ||
         persistedCommandcodeProfileKey ||
+        persistedOrcarouterProfileKey ||
         sanitizeApiKey(processEnv[dedicatedKey]) ||
         sanitizeApiKey(persistedEnv[dedicatedKey]) ||
         backfillLegacyApismartProfileKey ||

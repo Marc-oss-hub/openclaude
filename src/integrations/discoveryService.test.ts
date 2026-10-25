@@ -1715,3 +1715,33 @@ test('custom startup discovery retains its auth when another profile activates',
     },
   }).contextWindow).toBe(123456)
 })
+
+test('Orca discovery preserves reported context through the cache and runtime', async () => {
+  const { discoverModelsForRoute } = await loadDiscoveryServiceModule()
+  const { resolveModelRuntimeLimits } = await import('./runtimeMetadata.js')
+  const env: NodeJS.ProcessEnv = {
+    CLAUDE_CODE_USE_OPENAI: '1', OPENAI_BASE_URL: 'https://api.orcarouter.ai/v1',
+    ORCAROUTER_API_KEY: 'orca-key',
+  }
+  const fetchMock = mock((_input: RequestInfo | URL, init?: RequestInit) => {
+    expect(new Headers(init?.headers).get('authorization')).toBe('Bearer orca-key')
+    return Promise.resolve(Response.json({ data: [
+      { id: 'anthropic/claude-sonnet-4.6', context_length: 1_000_000 },
+      { id: 'discovered-chat-model', context_length: 262_144 },
+    ] }))
+  })
+  setMockFetch(fetchMock as unknown as typeof globalThis.fetch)
+  const options = { baseUrl: env.OPENAI_BASE_URL, apiKey: 'orca-key' }
+  expect((await discoverModelsForRoute('orcarouter', {
+    ...options, forceRefresh: true,
+  }))?.source).toBe('network')
+  expect((await discoverModelsForRoute('orcarouter', options))?.source).toBe('cache')
+  expect(fetchMock).toHaveBeenCalledTimes(1)
+  for (const [model, contextWindow] of [
+    ['anthropic/claude-sonnet-4.6', 1_000_000],
+    ['discovered-chat-model', 262_144],
+  ] as const) {
+    expect(resolveModelRuntimeLimits({ model, processEnv: env }).contextWindow)
+      .toBe(contextWindow)
+  }
+})
