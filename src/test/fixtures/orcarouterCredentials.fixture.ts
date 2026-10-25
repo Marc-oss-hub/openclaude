@@ -92,6 +92,24 @@ if (scenario === 'remove-inherited') {
   assert.equal(child.exitCode, 0, child.stderr.toString())
   finish(JSON.parse(child.stdout.toString()))
 }
+if (scenario === 'remove-before-startup') {
+  activate()
+  if (option === 'generic-removed') delete process.env.OPENAI_API_KEY
+  if (option === 'replacement') {
+    process.env.ORCAROUTER_API_KEY = 'replacement-shell-key'
+    delete process.env.OPENAI_API_KEY
+  }
+  const inheritedEnv = { ...process.env }
+  const editor = Bun.spawnSync([process.execPath, import.meta.path, 'edit', provider], {
+    env: process.env, timeout: 5_000,
+  })
+  assert.equal(editor.exitCode, 0, editor.stderr.toString())
+  const child = Bun.spawnSync([process.execPath, import.meta.path, 'pane-child'], {
+    env: inheritedEnv, timeout: 5_000,
+  })
+  assert.equal(child.exitCode, 0, child.stderr.toString())
+  finish(JSON.parse(child.stdout.toString()))
+}
 if (scenario === 'remove') activate()
 else {
   assert.equal(scenario, 'remove-aligned')

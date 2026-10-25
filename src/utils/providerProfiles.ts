@@ -1,6 +1,6 @@
 import { getGeminiVertexProjectId, geminiVertexAdcWillResolveProject } from './geminiAuth.js'
 import { isEnvTruthy } from './envUtils.js'
-import { randomBytes } from 'crypto'
+import { createHash, randomBytes } from 'crypto'
 import {
   getAdditionalModelOptionsCacheScope,
   isLocalProviderUrl,
@@ -117,24 +117,32 @@ export type ProviderPresetDefaults = Omit<ProviderProfileInput, 'provider'> & {
 const PROFILE_ENV_APPLIED_FLAG = 'CLAUDE_CODE_PROVIDER_PROFILE_ENV_APPLIED'
 const PROFILE_ENV_APPLIED_ID = 'CLAUDE_CODE_PROVIDER_PROFILE_ENV_APPLIED_ID'
 
-// Keep the installed key's origin independent of mutable saved config. Another
-// CLI can remove that saved key before this process next reconciles its env.
-let appliedOrcarouterCredential: { profileId: string; value: string } | undefined
+const PROFILE_ORCAROUTER_KEY_SHA256 =
+  'CLAUDE_CODE_PROVIDER_PROFILE_ORCAROUTER_KEY_SHA256'
 
-function isManagedOrcarouterCredential(processEnv: NodeJS.ProcessEnv): boolean {
-  return appliedOrcarouterCredential !== undefined &&
-    processEnv[PROFILE_ENV_APPLIED_FLAG] === '1' &&
-    processEnv[PROFILE_ENV_APPLIED_ID] === appliedOrcarouterCredential.profileId &&
-    sanitizeApiKey(processEnv.ORCAROUTER_API_KEY)?.trim() === appliedOrcarouterCredential.value
+function orcarouterCredentialFingerprint(profileId: string, value: string): string {
+  return createHash('sha256').update(profileId).update('\0').update(value).digest('hex')
 }
 
-function rememberManagedOrcarouterCredential(profile: ProviderProfile): void {
+function isManagedOrcarouterCredential(processEnv: NodeJS.ProcessEnv): boolean {
+  const profileId = trimOrUndefined(processEnv[PROFILE_ENV_APPLIED_ID])
+  const value = sanitizeApiKey(processEnv.ORCAROUTER_API_KEY)?.trim()
+  return processEnv[PROFILE_ENV_APPLIED_FLAG] === '1' && !!profileId && !!value &&
+    processEnv[PROFILE_ORCAROUTER_KEY_SHA256] === orcarouterCredentialFingerprint(profileId, value)
+}
+
+function rememberManagedOrcarouterCredential(
+  profile: ProviderProfile,
+  processEnv: NodeJS.ProcessEnv = process.env,
+): void {
   const value = sanitizeApiKey(profile.apiKey)?.trim()
   if (value && resolveRouteIdFromBaseUrl(profile.baseUrl) === 'orcarouter' &&
-    process.env[PROFILE_ENV_APPLIED_FLAG] === '1' &&
-    trimOrUndefined(process.env[PROFILE_ENV_APPLIED_ID]) === profile.id &&
-    sanitizeApiKey(process.env.ORCAROUTER_API_KEY)?.trim() === value) {
-    appliedOrcarouterCredential = { profileId: profile.id, value }
+    processEnv[PROFILE_ENV_APPLIED_FLAG] === '1' &&
+    trimOrUndefined(processEnv[PROFILE_ENV_APPLIED_ID]) === profile.id &&
+    sanitizeApiKey(processEnv.ORCAROUTER_API_KEY)?.trim() === value) {
+    // Inherit provenance with the applied markers: saved config can change
+    // before a child starts, so it cannot reconstruct ownership from config.
+    processEnv[PROFILE_ORCAROUTER_KEY_SHA256] = orcarouterCredentialFingerprint(profile.id, value)
   }
 }
 
@@ -1206,7 +1214,6 @@ export function clearProviderProfileEnvFromProcessEnv(
   clearManagedProfileEnv(processEnv)
   delete processEnv[PROFILE_ENV_APPLIED_FLAG]
   delete processEnv[PROFILE_ENV_APPLIED_ID]
-  if (processEnv === process.env) appliedOrcarouterCredential = undefined
 }
 
 export function applyProviderProfileToProcessEnv(
@@ -1624,9 +1631,9 @@ export function applyActiveProviderProfileFromConfig(
     return undefined
   }
 
-  // A fresh process may inherit the applied markers and key. Establish its
-  // provenance while the matching saved record still supplies that key.
-  rememberManagedOrcarouterCredential(activeProfile)
+  // Bootstrap older inherited environments while the matching saved keyed
+  // record is available; new environments already carry their fingerprint.
+  rememberManagedOrcarouterCredential(activeProfile, processEnv)
 
   const isCurrentEnvProfileManaged =
     processEnv[PROFILE_ENV_APPLIED_FLAG] === '1' &&

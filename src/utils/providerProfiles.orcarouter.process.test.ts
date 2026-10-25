@@ -42,6 +42,11 @@ for (const phase of ['host-pre', 'host-post']) {
   }, 20_000)
 }
 for (const provider of ['openai', 'orcarouter']) {
+  test.each(['', 'generic-removed', 'replacement'])(
+    `${provider} Orca startup rejects an inherited key removed before startup (%s)`, option => {
+      expect(run('remove-before-startup', provider, option).authorization)
+        .toBe(option === 'replacement' ? 'Bearer replacement-shell-key' : null)
+    }, 20_000)
   test(`${provider} Orca initializes ownership when startup inherits an aligned profile`, () => {
     expect(run('remove-inherited', provider, 'generic-removed').authorization).toBeNull()
   }, 20_000)
