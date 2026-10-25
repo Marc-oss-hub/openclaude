@@ -1274,9 +1274,14 @@ export function applyProviderProfileToProcessEnv(
       OPENAI_MODEL: primaryModel,
     }
     // Keyless canonical profiles already accept the dedicated shell key.
-    // Capture it before managed-env cleanup, without promoting a generic key.
-    if (!profile.apiKey && resolveRouteIdFromBaseUrl(normalizedProfileBaseUrl) === 'orcarouter') {
-      openAIProfileEnv.ORCAROUTER_API_KEY = sanitizeApiKey(process.env.ORCAROUTER_API_KEY)
+    // Capture it before cleanup only when it is not owned by another profile.
+    const mayReuseOrcaEnvKey =
+      process.env[PROFILE_ENV_APPLIED_FLAG] !== '1' ||
+      trimOrUndefined(process.env[PROFILE_ENV_APPLIED_ID]) === profile.id
+    if (!profile.apiKey && mayReuseOrcaEnvKey &&
+      resolveRouteIdFromBaseUrl(normalizedProfileBaseUrl) === 'orcarouter') {
+      const ambientKey = sanitizeApiKey(process.env.ORCAROUTER_API_KEY)
+      if (ambientKey) openAIProfileEnv.ORCAROUTER_API_KEY = ambientKey
     }
     const isAimlapiProfile =
       profile.provider === 'aimlapi' ||
@@ -1692,6 +1697,7 @@ export function updateProviderProfile(
 
   let wasUpdated = false
   let shouldApply = false
+  let previousOrcaApiKey: string | undefined
 
   saveGlobalConfig(current => {
     const currentProfiles = getProviderProfiles(current)
@@ -1704,6 +1710,10 @@ export function updateProviderProfile(
     }
 
     wasUpdated = true
+    const previousProfile = currentProfiles[profileIndex]!
+    previousOrcaApiKey = resolveRouteIdFromBaseUrl(previousProfile.baseUrl) === 'orcarouter'
+      ? sanitizeApiKey(previousProfile.apiKey)?.trim()
+      : undefined
 
     const nextProfiles = [...currentProfiles]
     nextProfiles[profileIndex] = updatedProfile
@@ -1741,6 +1751,14 @@ export function updateProviderProfile(
   }
 
   if (shouldApply) {
+    // The config now contains the edited record. Do not re-adopt a removed
+    // saved key as ambient input when reapplying this same managed profile.
+    if (!updatedProfile.apiKey && previousOrcaApiKey &&
+      process.env[PROFILE_ENV_APPLIED_FLAG] === '1' &&
+      trimOrUndefined(process.env[PROFILE_ENV_APPLIED_ID]) === profileId &&
+      sanitizeApiKey(process.env.ORCAROUTER_API_KEY)?.trim() === previousOrcaApiKey) {
+      delete process.env.ORCAROUTER_API_KEY
+    }
     setActiveProviderProfile(profileId)
   }
 
