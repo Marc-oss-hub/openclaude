@@ -162,7 +162,7 @@ export const providers: Provider[] = [
     group: 'gateways',
     setup: '/provider or ORCAROUTER_API_KEY with --provider orcarouter',
     envVars: ['ORCAROUTER_API_KEY'],
-    notes: 'OpenAI-compatible model routing gateway with named auto routing.',
+    notes: 'OpenAI-compatible model routing gateway with named auto routing. Existing environment setups must replace OPENAI_API_KEY with ORCAROUTER_API_KEY, even when a custom authentication header supplies the request credential. Custom headers remain supported.',
   },
   {
     id: 'near-ai',
