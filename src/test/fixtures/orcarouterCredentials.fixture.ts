@@ -49,6 +49,19 @@ if (scenario === 'pane-child') {
   await applyStartupEnvFromProfile()
   finish({ validation: await getProviderValidationError(), authorization: await authorization() })
 }
+if (scenario === 'shell-switch') {
+  const first = { ...profile, apiKey: undefined }
+  const second = { ...first, id: 'second-keyless-orca' }
+  process.env.ORCAROUTER_API_KEY = 'shell-key'
+  saveGlobalConfig(current => ({ ...current, providerProfiles: [first, second] }))
+  const headers: Array<string | null> = []
+  for (const selected of [first, second, first]) {
+    setActiveProviderProfile(selected.id, { configDir: process.env.OPENCLAUDE_CONFIG_DIR })
+    headers.push(await authorization())
+    assert.equal(getGlobalConfig().providerProfiles?.find(p => p.id === selected.id)?.apiKey, undefined)
+  }
+  finish({ headers, validation: await getProviderValidationError() })
+}
 if (scenario === 'pane') {
   activate()
   // An existing tmux login shell has none of the leader's provider credentials.

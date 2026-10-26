@@ -1310,10 +1310,8 @@ export function applyProviderProfileToProcessEnv(
     // Keyless canonical profiles already accept the dedicated shell key.
     // Reuse only actual shell input, not a key installed by this or another
     // profile, including when another CLI removed this profile's saved key.
-    const mayReuseOrcaEnvKey =
-      process.env[PROFILE_ENV_APPLIED_FLAG] !== '1' ||
-      trimOrUndefined(process.env[PROFILE_ENV_APPLIED_ID]) === profile.id
-    if (!profile.apiKey && mayReuseOrcaEnvKey &&
+    // Changing profile IDs does not change the origin of genuine shell input.
+    if (!profile.apiKey &&
       resolveRouteIdFromBaseUrl(normalizedProfileBaseUrl) === 'orcarouter') {
       const ambientKey = sanitizeApiKey(process.env.ORCAROUTER_API_KEY)
       if (ambientKey && !isManagedOrcarouterCredential(process.env)) {

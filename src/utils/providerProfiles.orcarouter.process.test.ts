@@ -42,6 +42,11 @@ for (const phase of ['host-pre', 'host-post']) {
   }, 20_000)
 }
 for (const provider of ['openai', 'orcarouter']) {
+  test(`${provider} Orca keyless profile switches retain genuine shell authentication`, () => {
+    const result = run('shell-switch', provider)
+    expect(result.headers).toEqual(['Bearer shell-key', 'Bearer shell-key', 'Bearer shell-key'])
+    expect(result.validation).toBeNull()
+  }, 20_000)
   test.each(['', 'generic-removed', 'replacement'])(
     `${provider} Orca startup rejects an inherited key removed before startup (%s)`, option => {
       expect(run('remove-before-startup', provider, option).authorization)
