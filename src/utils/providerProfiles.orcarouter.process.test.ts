@@ -42,6 +42,17 @@ for (const phase of ['host-pre', 'host-post']) {
   }, 20_000)
 }
 for (const provider of ['openai', 'orcarouter']) {
+  for (const scenario of ['legacy-startup', 'legacy-session']) {
+    test.each(['', 'replacement'])(`${provider} Orca keyless selection after ${scenario} rejects saved credentials (%s)`, option => {
+      expect(run(scenario, provider, option).authorization)
+        .toBe(option === 'replacement' ? 'Bearer replacement-shell-key' : null)
+    }, 20_000)
+  }
+  test.each(['', 'generic-removed', 'replacement'])(
+    `${provider} Orca launcher preserves removed-key ownership (%s)`, option => {
+      expect(run('remove-before-launch', provider, option).authorization)
+        .toBe(option === 'replacement' ? 'Bearer replacement-shell-key' : null)
+    }, 20_000)
   test(`${provider} Orca keyless profile switches retain genuine shell authentication`, () => {
     const result = run('shell-switch', provider)
     expect(result.headers).toEqual(['Bearer shell-key', 'Bearer shell-key', 'Bearer shell-key'])
@@ -60,4 +71,15 @@ for (const provider of ['openai', 'orcarouter']) {
       expect(run('remove', provider, option).authorization)
         .toBe(option === 'replacement' ? 'Bearer replacement-shell-key' : null)
     }, 20_000)
+}
+
+for (const provider of ['openai', 'custom']) {
+  test.each(['responses', 'responses_compat'])(`${provider} Orca startup preserves explicit API format %s`, apiFormat => {
+    const result = run('api-format', provider, apiFormat)
+    expect(result.apiFormat).toBe(apiFormat)
+    expect(result.authorization).toBe('Bearer selected-key')
+    expect(result.request).toEqual({
+      url: 'https://api.orcarouter.ai/v1/responses', input: true, messages: false,
+    })
+  }, 20_000)
 }

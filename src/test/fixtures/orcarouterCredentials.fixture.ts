@@ -3,8 +3,8 @@ import type Anthropic from '@anthropic-ai/sdk'
 import { createOpenAIShimClient } from '../../services/api/openaiShim.js'
 import { enableConfigs, getGlobalConfig, saveGlobalConfig } from '../../utils/config.js'
 import { applyConfigEnvironmentVariables, applySafeConfigEnvironmentVariables } from '../../utils/managedEnv.js'
-import { applyStartupEnvFromProfile } from '../../utils/providerProfile.js'
-import { applyActiveProviderProfileFromConfig, setActiveProviderProfile, updateProviderProfile } from '../../utils/providerProfiles.js'
+import { applySavedProfileToCurrentSession, applyStartupEnvFromProfile, buildLaunchEnv, createProfileFile } from '../../utils/providerProfile.js'
+import { addProviderProfile, applyActiveProviderProfileFromConfig, getProviderProfiles, setActiveProviderProfile, updateProviderProfile } from '../../utils/providerProfiles.js'
 import { getProviderValidationError } from '../../utils/providerValidation.js'
 import { quote } from '../../utils/bash/shellQuote.js'
 import { buildInheritedEnvVars } from '../../utils/swarm/spawnUtils.js'
@@ -17,10 +17,21 @@ const profile = {
 }
 enableConfigs()
 getGlobalConfig() // Start the normal watcher before either process writes.
+let request: { url: string; input: boolean; messages: boolean } | undefined
 async function authorization() {
   let header: string | null = null
-  globalThis.fetch = Object.assign(async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+  globalThis.fetch = Object.assign(async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
     header = new Headers(init?.headers).get('authorization')
+    const body = JSON.parse(String(init?.body))
+    request = { url: String(input), input: !!body.input, messages: !!body.messages }
+    if (request.url.endsWith('/responses')) {
+      return Response.json({
+        id: 'reply', object: 'response', status: 'completed', model: profile.model,
+        output: [{ type: 'message', id: 'msg', role: 'assistant', status: 'completed',
+          content: [{ type: 'output_text', text: 'done', annotations: [] }] }],
+        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+      })
+    }
     return Response.json({
       id: 'reply', model: profile.model,
       choices: [{ message: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }],
@@ -48,6 +59,31 @@ if (scenario === 'pane-child') {
   applySafeConfigEnvironmentVariables()
   await applyStartupEnvFromProfile()
   finish({ validation: await getProviderValidationError(), authorization: await authorization() })
+}
+if (scenario === 'api-format') {
+  assert(option === 'responses' || option === 'responses_compat')
+  saveGlobalConfig(current => ({
+    ...current, providerProfiles: [{ ...profile, apiFormat: option }],
+    activeProviderProfileId: profile.id,
+  }))
+  applySafeConfigEnvironmentVariables()
+  await applyStartupEnvFromProfile()
+  finish({ apiFormat: getProviderProfiles()[0]?.apiFormat,
+    authorization: await authorization(), request })
+}
+if (scenario === 'legacy-startup' || scenario === 'legacy-session') {
+  const persisted = createProfileFile('openai', {
+    OPENAI_BASE_URL: profile.baseUrl, OPENAI_MODEL: profile.model,
+    OPENAI_API_KEY: profile.apiKey,
+  })
+  const error = scenario === 'legacy-startup'
+    ? await applyStartupEnvFromProfile({ persisted })
+    : await applySavedProfileToCurrentSession({ profileFile: persisted })
+  assert.equal(error, null)
+  assert.equal(await authorization(), 'Bearer selected-key')
+  if (option === 'replacement') process.env.ORCAROUTER_API_KEY = 'replacement-shell-key'
+  assert(addProviderProfile({ ...profile, name: 'Keyless Orca', apiKey: undefined }))
+  finish({ authorization: await authorization() })
 }
 if (scenario === 'shell-switch') {
   const first = { ...profile, apiKey: undefined }
@@ -105,18 +141,23 @@ if (scenario === 'remove-inherited') {
   assert.equal(child.exitCode, 0, child.stderr.toString())
   finish(JSON.parse(child.stdout.toString()))
 }
-if (scenario === 'remove-before-startup') {
+if (scenario === 'remove-before-startup' || scenario === 'remove-before-launch') {
   activate()
   if (option === 'generic-removed') delete process.env.OPENAI_API_KEY
   if (option === 'replacement') {
     process.env.ORCAROUTER_API_KEY = 'replacement-shell-key'
     delete process.env.OPENAI_API_KEY
   }
-  const inheritedEnv = { ...process.env }
+  let inheritedEnv = { ...process.env }
   const editor = Bun.spawnSync([process.execPath, import.meta.path, 'edit', provider], {
     env: process.env, timeout: 5_000,
   })
   assert.equal(editor.exitCode, 0, editor.stderr.toString())
+  if (scenario === 'remove-before-launch') {
+    inheritedEnv = await buildLaunchEnv({
+      profile: 'openai', persisted: null, goal: 'balanced', processEnv: inheritedEnv,
+    })
+  }
   const child = Bun.spawnSync([process.execPath, import.meta.path, 'pane-child'], {
     env: inheritedEnv, timeout: 5_000,
   })

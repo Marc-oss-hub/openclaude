@@ -1,6 +1,6 @@
 import { getGeminiVertexProjectId, geminiVertexAdcWillResolveProject } from './geminiAuth.js'
 import { isEnvTruthy } from './envUtils.js'
-import { createHash, randomBytes } from 'crypto'
+import { randomBytes } from 'crypto'
 import {
   getAdditionalModelOptionsCacheScope,
   isLocalProviderUrl,
@@ -38,6 +38,9 @@ import {
   buildApismartProfileEnv,
   buildVertexProfileEnv,
   clearManagedProfileEnv,
+  isManagedOrcarouterCredential,
+  orcarouterCredentialFingerprint,
+  PROFILE_ORCAROUTER_KEY_SHA256,
   deleteProfileFile,
   type ProfileFileLocation,
   type ProfileEnv,
@@ -117,20 +120,6 @@ export type ProviderPresetDefaults = Omit<ProviderProfileInput, 'provider'> & {
 const PROFILE_ENV_APPLIED_FLAG = 'CLAUDE_CODE_PROVIDER_PROFILE_ENV_APPLIED'
 const PROFILE_ENV_APPLIED_ID = 'CLAUDE_CODE_PROVIDER_PROFILE_ENV_APPLIED_ID'
 
-const PROFILE_ORCAROUTER_KEY_SHA256 =
-  'CLAUDE_CODE_PROVIDER_PROFILE_ORCAROUTER_KEY_SHA256'
-
-function orcarouterCredentialFingerprint(profileId: string, value: string): string {
-  return createHash('sha256').update(profileId).update('\0').update(value).digest('hex')
-}
-
-function isManagedOrcarouterCredential(processEnv: NodeJS.ProcessEnv): boolean {
-  const profileId = trimOrUndefined(processEnv[PROFILE_ENV_APPLIED_ID])
-  const value = sanitizeApiKey(processEnv.ORCAROUTER_API_KEY)?.trim()
-  return processEnv[PROFILE_ENV_APPLIED_FLAG] === '1' && !!profileId && !!value &&
-    processEnv[PROFILE_ORCAROUTER_KEY_SHA256] === orcarouterCredentialFingerprint(profileId, value)
-}
-
 function rememberManagedOrcarouterCredential(
   profile: ProviderProfile,
   processEnv: NodeJS.ProcessEnv = process.env,
@@ -142,7 +131,7 @@ function rememberManagedOrcarouterCredential(
     sanitizeApiKey(processEnv.ORCAROUTER_API_KEY)?.trim() === value) {
     // Inherit provenance with the applied markers: saved config can change
     // before a child starts, so it cannot reconstruct ownership from config.
-    processEnv[PROFILE_ORCAROUTER_KEY_SHA256] = orcarouterCredentialFingerprint(profile.id, value)
+    processEnv[PROFILE_ORCAROUTER_KEY_SHA256] = orcarouterCredentialFingerprint(value)
   }
 }
 

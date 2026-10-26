@@ -1,4 +1,5 @@
 import { getGeminiVertexProjectId, geminiVertexAdcWillResolveProject } from './geminiAuth.js'
+import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import {
@@ -64,9 +65,23 @@ export const DEFAULT_MISTRAL_MODEL = 'mistral-vibe-cli-latest'
 export const DEFAULT_STARTUP_PROVIDER_ENV_VAR =
   'CLAUDE_CODE_DEFAULT_STARTUP_PROVIDER'
 
+export const PROFILE_ORCAROUTER_KEY_SHA256 =
+  'CLAUDE_CODE_PROVIDER_PROFILE_ORCAROUTER_KEY_SHA256'
+
+export function orcarouterCredentialFingerprint(value: string): string {
+  return createHash('sha256').update(sanitizeApiKey(value)?.trim() ?? '').digest('hex')
+}
+
+export function isManagedOrcarouterCredential(env: NodeJS.ProcessEnv): boolean {
+  const key = sanitizeApiKey(env.ORCAROUTER_API_KEY)
+  // Credential origin is independent of selection markers: legacy profile
+  // files have no plural profile id, and rebuilding an env can reset selection.
+  return !!key && env[PROFILE_ORCAROUTER_KEY_SHA256] === orcarouterCredentialFingerprint(key)
+}
+
 const PROFILE_ENV_KEYS = [
   'CLAUDE_CODE_USE_GEMINI_VERTEX',
-  'CLAUDE_CODE_PROVIDER_PROFILE_ORCAROUTER_KEY_SHA256',
+  PROFILE_ORCAROUTER_KEY_SHA256,
   'CLAUDE_CODE_USE_OPENAI',
   'CLAUDE_CODE_USE_GITHUB',
   'CLAUDE_CODE_USE_GEMINI',
@@ -183,6 +198,7 @@ export type ProviderProfile =
   | 'clinepass'
 
 export type ProfileEnv = {
+  CLAUDE_CODE_PROVIDER_PROFILE_ORCAROUTER_KEY_SHA256?: string
   ANTHROPIC_BASE_URL?: string
   ANTHROPIC_MODEL?: string
   ANTHROPIC_API_KEY?: string
@@ -2533,6 +2549,11 @@ export async function buildLaunchEnv(options: {
         backfillLegacyConcentrateProfileKey
     if (dedicatedValue) {
       env[dedicatedKey] = dedicatedValue
+      if (dedicatedKey === 'ORCAROUTER_API_KEY' &&
+        (persistedOrcarouterProfileKey ||
+          (!sanitizeApiKey(processEnv.ORCAROUTER_API_KEY) && persistedEnv.ORCAROUTER_API_KEY))) {
+        env[PROFILE_ORCAROUTER_KEY_SHA256] = orcarouterCredentialFingerprint(dedicatedValue)
+      }
     }
   }
   if (effectiveOpenAIRouteId === 'nvidia-nim') {
@@ -2721,8 +2742,16 @@ export function applyProfileEnvToProcessEnv(
   targetEnv: NodeJS.ProcessEnv,
   nextEnv: NodeJS.ProcessEnv,
 ): void {
+  const retainedOrcarouterOrigin =
+    isManagedOrcarouterCredential(targetEnv) &&
+    sanitizeApiKey(targetEnv.ORCAROUTER_API_KEY) === sanitizeApiKey(nextEnv.ORCAROUTER_API_KEY)
+      ? targetEnv[PROFILE_ORCAROUTER_KEY_SHA256]
+      : undefined
   clearManagedProfileEnv(targetEnv)
   Object.assign(targetEnv, nextEnv)
+  if (retainedOrcarouterOrigin) {
+    targetEnv[PROFILE_ORCAROUTER_KEY_SHA256] = retainedOrcarouterOrigin
+  }
 }
 
 type StartupEnvOptions = NonNullable<Parameters<typeof buildStartupEnvFromProfile>[0]>
