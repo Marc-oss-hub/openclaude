@@ -2,10 +2,12 @@ import { APIError } from '@anthropic-ai/sdk'
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test'
 import { getEventListeners } from 'node:events'
 import { acquireSharedMutationLock, releaseSharedMutationLock } from '../../test/sharedMutationLock.js'
+import { snapshotEnv } from '../../test/envSnapshot.js'
 import { asMockFetch } from '../../test/typedMocks.js'
 import { _clearRegistryForTesting, ensureIntegrationsLoaded, registerGateway } from '../../integrations/index.ts'
 import { applyProviderFlag } from '../../utils/providerFlag.ts'
 import { applyProviderProfileToProcessEnv } from '../../utils/providerProfiles.ts'
+import { PROFILE_ORCAROUTER_KEY_SHA256 } from '../../utils/providerProfile.js'
 import {
   __resetInterruptionTraceForTests,
   __waitForInterruptionTraceFlushForTests,
@@ -81,6 +83,7 @@ const originalEnv = {
 }
 
 const originalFetch = globalThis.fetch
+let restoreOrcarouterCredentialOrigin: () => void
 
 function restoreEnv(key: string, value: string | undefined): void {
   if (value === undefined) {
@@ -496,6 +499,7 @@ async function captureChatCompletionRequest(
 
 beforeEach(async () => {
   await acquireSharedMutationLock('openaiShim.test.ts')
+  restoreOrcarouterCredentialOrigin = snapshotEnv([PROFILE_ORCAROUTER_KEY_SHA256], { clear: true })
   process.env.OPENAI_BASE_URL = 'http://example.test/v1'
   delete process.env.OPENAI_API_BASE
   process.env.OPENAI_API_KEY = 'test-key'
@@ -595,6 +599,7 @@ afterEach(() => {
     _clearRegistryForTesting()
     ensureIntegrationsLoaded()
   } finally {
+    restoreOrcarouterCredentialOrigin()
     releaseSharedMutationLock()
   }
 })
