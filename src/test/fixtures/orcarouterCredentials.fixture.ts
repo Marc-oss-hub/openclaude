@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import type Anthropic from '@anthropic-ai/sdk'
 import { createOpenAIShimClient } from '../../services/api/openaiShim.js'
-import { enableConfigs, getGlobalConfig, saveGlobalConfig } from '../../utils/config.js'
+import { enableConfigs, getGlobalConfig, saveGlobalConfig, type ProviderProfile } from '../../utils/config.js'
 import { applyConfigEnvironmentVariables, applySafeConfigEnvironmentVariables } from '../../utils/managedEnv.js'
 import { applySavedProfileToCurrentSession, applyStartupEnvFromProfile, buildLaunchEnv, createProfileFile } from '../../utils/providerProfile.js'
 import { addProviderProfile, applyActiveProviderProfileFromConfig, getProviderProfiles, setActiveProviderProfile, updateProviderProfile } from '../../utils/providerProfiles.js'
@@ -45,20 +45,25 @@ async function authorization() {
   })
   return header
 }
-function activate() {
+function activate(selectedProfile: ProviderProfile = profile) {
   saveGlobalConfig(current => ({
-    ...current, providerProfiles: [profile], activeProviderProfileId: profile.id,
+    ...current, providerProfiles: [selectedProfile], activeProviderProfileId: selectedProfile.id,
   }))
-  setActiveProviderProfile(profile.id, { configDir: process.env.OPENCLAUDE_CONFIG_DIR })
+  setActiveProviderProfile(selectedProfile.id, { configDir: process.env.OPENCLAUDE_CONFIG_DIR })
 }
 function finish(value: unknown): never {
   console.log(JSON.stringify(value))
   process.exit(0)
 }
-if (scenario === 'pane-child') {
+if (scenario === 'pane-child' || scenario === 'pane-keyless-child') {
   applySafeConfigEnvironmentVariables()
   await applyStartupEnvFromProfile()
-  finish({ validation: await getProviderValidationError(), authorization: await authorization() })
+  const initialAuthorization = await authorization()
+  if (scenario === 'pane-keyless-child') {
+    assert(addProviderProfile({ ...profile, name: 'Keyless Orca', apiKey: undefined }))
+    finish({ initialAuthorization, authorization: await authorization() })
+  }
+  finish({ validation: await getProviderValidationError(), authorization: initialAuthorization })
 }
 if (scenario === 'api-format') {
   assert(option === 'responses' || option === 'responses_compat')
@@ -99,11 +104,17 @@ if (scenario === 'shell-switch') {
   finish({ headers, validation: await getProviderValidationError() })
 }
 if (scenario === 'pane') {
-  activate()
+  if (option === 'shell') {
+    process.env.ORCAROUTER_API_KEY = 'shell-key'
+    activate({ ...profile, apiKey: undefined })
+  } else {
+    activate()
+    if (option === 'replacement') process.env.ORCAROUTER_API_KEY = 'replacement-shell-key'
+  }
   // An existing tmux login shell has none of the leader's provider credentials.
   const child = Bun.spawnSync(['/bin/sh', '-c',
     'env ' + buildInheritedEnvVars() + ' ' +
-    quote([process.execPath, import.meta.path, 'pane-child']),
+    quote([process.execPath, import.meta.path, option ? 'pane-keyless-child' : 'pane-child', provider]),
   ], {
     env: Object.fromEntries([
       'PATH', 'NODE_ENV', 'TMPDIR', 'TMP', 'TEMP', 'CARGO_TARGET_DIR', 'GOCACHE',

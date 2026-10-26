@@ -35,6 +35,18 @@ test.skipIf(process.platform === 'win32')('Orca pane inheritance authenticates a
   expect(result.authorization).toBe('Bearer selected-key')
 }, 20_000)
 
+for (const provider of ['openai', 'orcarouter']) {
+  for (const [option, initialAuthorization, authorization] of [
+    ['saved', 'Bearer selected-key', null],
+    ['shell', 'Bearer shell-key', 'Bearer shell-key'],
+    ['replacement', 'Bearer replacement-shell-key', 'Bearer replacement-shell-key'],
+  ] as const) {
+    test.skipIf(process.platform === 'win32')(`${provider} Orca pane keyless switch respects ${option} credential ownership`, () => {
+      expect(run('pane', provider, option)).toEqual({ initialAuthorization, authorization })
+    }, 20_000)
+  }
+}
+
 for (const phase of ['host-pre', 'host-post']) {
   test.each([true, false])(`Orca ${phase} settings merge preserves credential ownership (host managed: %s)`, managed => {
     expect(run(phase, 'openai', managed ? '' : 'unmanaged').authorization)
